@@ -13,10 +13,12 @@ import com.reddit.reddit.security.JWTProvider;
 import lombok.AllArgsConstructor;
 //import org.springframework.beans.factory.annotation.Autowired;
 //import lombok.NoArgsConstructor;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -58,6 +60,25 @@ public class AuthService {
         ));
     }
 
+    @Transactional(readOnly = true)
+    public User getCurrentUser(){
+        org.springframework.security.core.userdetails.User principal = (org.springframework.security.core.userdetails.User) SecurityContextHolder
+                .getContext()
+                .getAuthentication()
+                .getPrincipal();
+        return userRepository.findByUsername(principal.getUsername())
+                .orElseThrow(() -> new UsernameNotFoundException("User name not found "+principal.getUsername()));
+
+    }
+
+
+    public void fetchUserAndEnable(VerificationToken verificationToken){
+        String username = verificationToken.getUser().getUsername();
+        User user = userRepository.findByUsername(username).orElseThrow(() -> new SpringRedditException("User not found with name "+username));
+        user.setEnabled(true);
+        userRepository.save(user);
+    }
+
     private String generateVerificationToken(User user){
         String token = UUID.randomUUID().toString();
         VerificationToken verificationToken = new VerificationToken();
@@ -75,14 +96,6 @@ public class AuthService {
 
     }
 
-    @Transactional
-    public void fetchUserAndEnable(VerificationToken verificationToken){
-        String username = verificationToken.getUser().getUsername();
-        User user = userRepository.findByUsername(username).orElseThrow(() -> new SpringRedditException("User not found with name "+username));
-        user.setEnabled(true);
-        userRepository.save(user);
-    }
-
     public AuthenticationResponse login(LoginRequest loginRequest) {
         Authentication authenticate = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(
@@ -94,4 +107,21 @@ public class AuthService {
         String token = jwtProvider.generateToken(authenticate);
         return new AuthenticationResponse(token, loginRequest.getUsername());
     }
+
+    public AuthenticationResponse refreshToken(RefreshTokenRequest refreshTokenRequest){
+        refreshTokenService.validateRefreshToken(refreshTokenRequest.getRefreshToken());
+        String token = jwtProvider.generateTokenWithUserName(refreshTokenRequest.getUsername());
+        return AuthenticationResponse.builder()
+                .authenticationToken(token)
+                .refreshToken(refreshTokenRequest.getRefreshToken())
+                .expiresAt(Instant.now().plusMillis(jwtProvider.getJwtExpirationInMillis()))
+                .username(refreshTokenRequest.getUsername())
+                .build();
+    }
+
+    public boolean isLoggedIn(){
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return !(authentication instanceof AnonymousAuthenticationToken) && authentication.isAuthenticated();
+    }
 }
+
