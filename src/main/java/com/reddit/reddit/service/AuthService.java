@@ -2,6 +2,7 @@ package com.reddit.reddit.service;
 
 import com.reddit.reddit.dto.AuthenticationResponse;
 import com.reddit.reddit.dto.LoginRequest;
+import com.reddit.reddit.dto.RefreshTokenRequest;
 import com.reddit.reddit.dto.RegisterRequest;
 import com.reddit.reddit.exceptions.SpringRedditException;
 import com.reddit.reddit.model.NotificationEmail;
@@ -38,6 +39,7 @@ public class AuthService {
     private final MailService mailService;
     private final AuthenticationManager authenticationManager;
     private final JWTProvider jwtProvider;
+    private final RefreshTokenService refreshTokenService;
 
 
     public void signup(RegisterRequest registerRequest){
@@ -93,7 +95,6 @@ public class AuthService {
         Optional<VerificationToken> verificationToken =  verificationTokenRepository.findByToken(token);
         verificationToken.orElseThrow(()-> new SpringRedditException("Invalid Token"));
         fetchUserAndEnable(verificationToken.get());
-
     }
 
     public AuthenticationResponse login(LoginRequest loginRequest) {
@@ -105,7 +106,12 @@ public class AuthService {
         );
         SecurityContextHolder.getContext().setAuthentication(authenticate);
         String token = jwtProvider.generateToken(authenticate);
-        return new AuthenticationResponse(token, loginRequest.getUsername());
+        return AuthenticationResponse.builder()
+                .authenticationToken(token)
+                .refreshToken(refreshTokenService.generateRefreshToken().getToken())
+                .expiresAt(Instant.now().plusMillis(jwtProvider.getJwtExpirationInMillis()))
+                .username(loginRequest.getUsername())
+                .build();
     }
 
     public AuthenticationResponse refreshToken(RefreshTokenRequest refreshTokenRequest){
